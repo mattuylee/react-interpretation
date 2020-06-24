@@ -69,10 +69,14 @@ type BaseFiberRootProperties = {|
   // If an error is thrown, and there are no more updates in the queue, we try
   // rendering from the root one more time, synchronously, before handling
   // the error.
+  // 指示渲染这个fiber tree时是否发生了错误。如果发生了错误并且不是致命错误，react会重启渲染。
+  // 具体过程见renderRoot（ReactFiberScheduler.js）。
   didError: boolean,
 
   pendingCommitExpirationTime: ExpirationTime,
   // A finished work-in-progress HostRoot that's ready to be committed.
+  // 渲染阶段完成后将结果暂存在这个字段，如果时间片用完可下次调度再commit。其实就是work-in-progress
+  // tree 的 root fiber
   finishedWork: Fiber | null,
   // Timeout handle returned by setTimeout. Used to cancel a pending timeout, if
   // it's superseded by a new one.
@@ -86,8 +90,13 @@ type BaseFiberRootProperties = {|
   // Remaining expiration time on this root.
   // TODO: Lift this into the renderer
   // root 的剩余停止时间
+  // 在渲染阶段将Fiber的expirationTime和childExpirationTime和这个对比决定是否处理相关的
+  // 更新，而不是和FiberRoot#expirationTime对比
   nextExpirationTimeToWorkOn: ExpirationTime,
   // 过期时间
+  // 在**调度时**的优先级依据。即根据它来决定哪一个FiberRoot应该下一个被更新
+  // 注意它和nextExpirationTimeToWorkOn的区别，后者是已经选出了要更新的FiberRoot，用来决定
+  // Fiber树中哪些**节点**需要更新
   expirationTime: ExpirationTime,
   // List of top-level batches. This list indicates whether a commit should be
   // deferred. Also contains completion callbacks.
@@ -95,6 +104,7 @@ type BaseFiberRootProperties = {|
   firstBatch: Batch | null,
   // Linked-list of roots
   // root 的链表
+  // 当某个组件触发更新时，对应的FiberRoot被加入调度列表。此字段指向调度列表的下一个FiberRoot
   nextScheduledRoot: FiberRoot | null,
 
   // New Scheduler fields
