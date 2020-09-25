@@ -287,7 +287,7 @@ export function updateContainer(
   parentComponent: ?React$Component<any, any>,
   callback: ?Function,
 ): ExpirationTime {
-  // 取出容器的 fiber 对象，也就是 fiber root
+  // 取出容器的 fiber 对象，也就是 root fiber
   const current = container.current;
   // 计算时间
   const currentTime = requestCurrentTime();

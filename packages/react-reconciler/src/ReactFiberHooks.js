@@ -82,6 +82,8 @@ type Update<S, A> = {
   expirationTime: ExpirationTime,
   action: A,
   eagerReducer: ((S, A) => S) | null,
+  // 在非当前函数组件内触发更新时提前计算的更新结果，如果eagerReducer和当前的reducer
+  // 一样就可以复用这个结果而不用调用reducer来计算
   eagerState: S | null,
   next: Update<S, A> | null,
 };
@@ -151,7 +153,7 @@ let nextCurrentHook: Hook | null = null;
 let firstWorkInProgressHook: Hook | null = null;
 let workInProgressHook: Hook | null = null;
 let nextWorkInProgressHook: Hook | null = null;
-
+// 剩余的工作（优先级达不到当前遍历的优先级）的最大优先级
 let remainingExpirationTime: ExpirationTime = NoWork;
 let componentUpdateQueue: FunctionComponentUpdateQueue | null = null;
 let sideEffectTag: SideEffectTag = 0;
@@ -419,6 +421,8 @@ export function renderWithHooks(
     numberOfReRenders = 0;
   }
 
+  // 注意，到这里函数组件已经更新完了，下面只是把成果记录到fiber中
+  // 要看具体的过程应该去看HooksDispatcherOnMount和HooksDispatcherOnUpdate这两个对象里的东西
   // We can assume the previous dispatcher is always this one, since we set it
   // at the beginning of the render phase and there's no re-entrancy.
   ReactCurrentDispatcher.current = ContextOnlyDispatcher;
@@ -634,6 +638,8 @@ function updateReducer<S, I, A>(
   queue.lastRenderedReducer = reducer;
 
   if (numberOfReRenders > 0) {
+    // 当函数组件内同步调用了dispathAction函数（useState等返回的第二个值），会在函数执行
+    // 完后再次执行
     // This is a re-render. Apply the new render phase updates to the previous
     // work-in-progress hook.
     const dispatch: Dispatch<A> = (queue.dispatch: any);
@@ -660,6 +666,19 @@ function updateReducer<S, I, A>(
         }
 
         hook.memoizedState = newState;
+        // hook.baseUpdate即“基”update，该更新已经被处理过。因此如果hook.baseUpdate等
+        // 于更新队列中最后一个，即意味着当前更新队列为空（没有要处理的更新）。
+        // 注意，这个分支里处理的是函数组件中同步触发的更新，而这些更新是没有被加入更新队列的，
+        // 而是存在一个renderPhaseUpdates变量中，函数执行完后再次执行，从而被同步地处理。
+        // 因此更新队列里的更新只可能是在函数组件外部（useEffect的回调也算外部）触发的。而当
+        // 前分支已经是re-render了，即之前已经执行过一次了，因此更新队列中优先级足够的更新肯
+        // 定已经被处理了，如果队列里还有没处理的，一定是优先级低于当前优先级。
+        // 那为什么这里不覆盖hook.baseState呢，个人认为是因为renderPhaseUpdates里的更新
+        // 必然晚于更新队列中的更新（刚刚才触发），假设这些更新被放入更新队列，则应该处于较低
+        // 优先级的更新的后面，因此按照React处理更新队列的规则，不应该将当前处理的结果作为“基”，
+        // 因为当前处理的更新前面有更低优先级的更新。
+        // 关于React处理更新队列的规则，参考文件【ReactUpdateQueue.js】，最顶部的官方注释
+        // 说得很清楚。
         // Don't persist the state accumlated from the render phase updates to
         // the base state unless the queue is empty.
         // TODO: Not sure if this is the desired semantics, but it's what we
@@ -1071,6 +1090,8 @@ function dispatchAction<S, A>(
     fiber === currentlyRenderingFiber ||
     (alternate !== null && alternate === currentlyRenderingFiber)
   ) {
+    // 进入分支的条件是，在函数组件被执行的时候同步触发更新，并且更新发生在该组件自身。
+    // 先记录下来，等当前这次执行结束后会再次执行这个函数组件，参考renderWithHooks函数
     // This is a render phase update. Stash it in a lazily-created map of
     // queue -> linked list of updates. After this render pass, we'll restart
     // and apply the stashed updates on top of the work-in-progress hook.
@@ -1129,6 +1150,14 @@ function dispatchAction<S, A>(
       fiber.expirationTime === NoWork &&
       (alternate === null || alternate.expirationTime === NoWork)
     ) {
+      // 进入这个分支说明触发更新的目标节点不是当前正在处理的节点并且该节点当前没有任何更
+      // 新。
+      // React会尝试提前计算这个更新的结果，如果结果和更新前一致，那么就可以省下一次更新调
+      // 度。即使结果不一致，计算的结果也被保存下来，下次真正处理目标节点的时候如果reducer
+      // 没有变，就可以复用这次计算出的结果。而useState的reducer是内部固定的（参见
+      // basicStateReducer），只有useReducer才会让用户传reducer进来。所以绝大部分情
+      // 况都不会产生浪费，而这却能在触发无意义更新时节省下一次宝贵的调度更新机会。
+      //
       // The queue is currently empty, which means we can eagerly compute the
       // next state before entering the render phase. If the new state is the
       // same as the current state, we may be able to bail out entirely.

@@ -439,6 +439,16 @@ export function processUpdateQueue<State>(
     currentlyProcessingQueue = queue;
   }
 
+  // React的updateQueue处理有点trick的感觉，updateQueue里无非是各个partialState，
+  // React将优先级达到当前render阶段优先级（事实上应该是FiberRoot#nextExpirationToWorkOn）
+  // 的update合并到workInProcess的memoizedState里，但并不一定从updateQueue中删除该update
+  // 节点。如果前面有节点不满足优先级被跳过合并，则它之后的任何update节点都将被保留在新的updateQueue，
+  // 然后新的baseState就是遍历到第一个被跳过节点前经过合并前面所有update到原来的baseState的结果。
+  // 这样下次再次处理updateQueue时又从baseState开始（而不是上一次的处理结果），因此即使某些高优先级
+  // 的update被处理了多次，但结果是不变的。
+  // 可参考本文件顶部官方的解释。
+  // 官方解释了为什么向updateQueue添加节点时需要同时添加到current和alternate fiber的updateQueue，
+  // 为了防止更新丢失。单独把未处理的更新存在哪一边都会造成丢失的可能。
   // These values may change as we process the queue.
   let newBaseState = queue.baseState;
   let newFirstUpdate = null;
@@ -571,6 +581,7 @@ export function processUpdateQueue<State>(
   // dealt with the props. Context in components that specify
   // shouldComponentUpdate is tricky; but we'll have to account for
   // that regardless.
+
   workInProgress.expirationTime = newExpirationTime;
   workInProgress.memoizedState = resultState;
 

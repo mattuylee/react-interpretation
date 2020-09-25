@@ -715,6 +715,9 @@ function updateClassComponent(
     shouldUpdate = true;
   } else if (current === null) {
     // In a resume, we'll already have an instance we can reuse.
+    // 这个分支发生在concurrent mode下第一次渲染组件。处理到父fiber时通过reconcileChildren()
+    // 创建了fiber之后，返回到workLoop时如果超时就会退出render阶段，此时最后一个处理的fiber的
+    // 子fiber（假设是ClassComponent）被创建但尚未实例化
     shouldUpdate = resumeMountClassInstance(
       workInProgress,
       Component,
@@ -959,6 +962,11 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
     // case. We won't handle it as a reified child. We will instead handle
     // this in the host environment that also have access to this prop. That
     // avoids allocating another HostText fiber and traversing it.
+    // 如果元素是textarea、option等不能包含子元素的html元素，或者其子元素是文本或
+    // 数字，则直接将props.children当作文本内容作为该元素的textContent而不是创建
+    // 子元素。
+    // 因此，<option><h1>FOOBAR</h1></option>会在选择框中显示[object Object]，
+    // 因为jsx转换后生成的ReactElement对象被当作文本处理了
     nextChildren = null;
   } else if (prevProps !== null && shouldSetTextContent(type, prevProps)) {
     // If we're switching from a direct text child to a normal child, or to
